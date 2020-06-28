@@ -18,8 +18,8 @@ module axi_sram #(
     parameter integer SRAM_BANK_ADDR_WIDTH=16,
     parameter integer SRAM_BANK_DATA_WIDTH=32,
     parameter integer SRAM_READ_LATENCY=2,
-    parameter integer WRITE_REQUESTS=2,
-    parameter integer READ_REQUESTS=2
+    parameter integer WRITE_REQUEST_FIFO_DEPTH=2,
+    parameter integer READ_REQUEST_FIFO_DEPTH=2
 ) (
     input logic clk_i,
     input logic rst_ni,
@@ -35,6 +35,11 @@ module axi_sram #(
     output logic                      [SRAM_BANKS_COLS-1:0][SRAM_BANK_DATA_WIDTH-1:0]           bank_wdata,
     input  logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0][SRAM_BANK_DATA_WIDTH-1:0]           bank_rdata
 );
+    genvar i,j;
+
+    logic read_request_free;
+    logic write_request_free;
+
     //
     // Read result pipeline
     //
@@ -47,11 +52,11 @@ module axi_sram #(
     //
     // The data fifo holds read results from the memory core 
     //
-    logic [AXI_DATA_WIDTH-1:0] read_data_fifo_in;
+    logic [AXI_DATA_WIDTH-1:0] read_data_fifo_in, read_data_fifo_out;
 
     fifo_v3 #(
         .DATA_WIDTH ( SRAM_BANKS_COLS * SRAM_BANK_DATA_WIDTH ),
-        .DEPTH      ( SRAM_READ_LATENCY + READ_FIFO_DEPTH    ),
+        .DEPTH      ( SRAM_READ_LATENCY + READ_FIFO_DEPTH    )
     ) read_data_fifo (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
@@ -68,7 +73,7 @@ module axi_sram #(
         .push_i(read_data_fifo_push),
 
         .data_o(read_data_fifo_out),
-        .pop_o(read_data_fifo_pop)
+        .pop_i(read_data_fifo_pop)
     );
 
     assign read_data_fifo_pop = axi.r_ready && axi.r_valid;
@@ -87,9 +92,14 @@ module axi_sram #(
         logic last;
     } read_id_fifo_entry_t;
 
+    read_id_fifo_entry_t read_id_fifo_in, read_id_fifo_out;
+
+    assign read_id_fifo_in.id   = read_request_data_out.id;
+    assign read_id_fifo_in.last = read_request_free;
+
     fifo_v3 #(
         .DATA_WIDTH ( $bits(read_id_fifo_entry_t) ),
-        .DEPTH      ( SRAM_READ_LATENCY + READ_FIFO_DEPTH    ),
+        .DEPTH      ( SRAM_READ_LATENCY + READ_FIFO_DEPTH    )
     ) read_id_fifo (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
@@ -102,11 +112,11 @@ module axi_sram #(
 
         .usage_o(),
 
-        .data_i(read_request_data_out.id),
-        .push_i(read_request_fifo_pop),
+        .data_i(read_id_fifo_in),
+        .push_i(read_request_free),
 
         .data_o(read_id_fifo_out),
-        .pop_o(read_id_fifo_pop)
+        .pop_i(read_id_fifo_pop)
     );
 
     assign read_id_fifo_pop = axi.r_ready && axi.r_valid;
@@ -121,8 +131,11 @@ module axi_sram #(
         logic [AXI_ADDR_WIDTH-1:0] addr;
         logic [AXI_ID_WIDTH-1:0]   id;
         axi_pkg::len_t             len;
+        axi_pkg::size_t            size;
         axi_pkg::burst_t           burst;
     } mem_request_t;
+
+    mem_request_t read_request_data_in, read_request_data_out;
 
     fifo_v3 #(
         .DATA_WIDTH ( $bits(mem_request_t) ),
@@ -137,14 +150,16 @@ module axi_sram #(
         .full_o(read_request_fifo_full),
         .empty_o(read_request_fifo_empty),
 
-        .usage_0(read_request_fifo_occupancy),
+        .usage_o(read_request_fifo_occupancy),
 
         .data_i(read_request_data_in),
         .push_i(axi.ar_valid && axi.ar_ready),
 
         .data_o(read_request_data_out),
-        .pop_o(read_request_free)
+        .pop_i(read_request_free)
     );
+
+    mem_request_t write_request_data_in, write_request_data_out;
 
     fifo_v3 #(
         .DATA_WIDTH ( $bits(mem_request_t) ),
@@ -165,7 +180,7 @@ module axi_sram #(
         .push_i(axi.aw_valid && axi.aw_ready),
 
         .data_o(write_request_data_out),
-        .pop_o(write_request_free)
+        .pop_i(write_request_free)
     );
     //
     // AR channel management
@@ -174,6 +189,7 @@ module axi_sram #(
     assign read_request_data_in.addr = axi.ar_addr;
     assign read_request_data_in.id   = axi.ar_id;
     assign read_request_data_in.len  = axi.ar_len;
+    assign read_request_data_in.size = axi.ar_size;
     assign read_request_data_in.burst = axi.ar_burst; 
 
     //
@@ -183,7 +199,11 @@ module axi_sram #(
     assign write_request_data_in.addr = axi.aw_addr;
     assign write_request_data_in.id   = axi.aw_id;
     assign write_request_data_in.len  = axi.aw_len;
+    assign write_request_data_in.size = axi.aw_size;
     assign write_request_data_in.burst = axi.aw_burst; 
+
+
+    logic write_request_tick, read_request_tick;
 
 
     //
@@ -191,15 +211,17 @@ module axi_sram #(
     //
     typedef struct packed {
         logic [AXI_DATA_WIDTH-1:0] data;
-        logic [(AXI_DATA_WIDTH/8)-1:0] be;
+        logic [(AXI_DATA_WIDTH/8)-1:0] strb;
     } write_data_fifo_entry_t;
 
-    write_data_fifo_entry_t write_data_fifo_in = '{ data: axi.w_data, be: axi.w_strb };
+    write_data_fifo_entry_t write_data_fifo_in = '{ data: axi.w_data, strb: axi.w_strb };
     write_data_fifo_entry_t write_data_fifo_out;
+
+    logic write_data_fifo_empty;
 
     fifo_v3 #(
         .DATA_WIDTH ( $bits(write_data_fifo_entry_t) ),
-        .DEPTH      ( 2                              ),
+        .DEPTH      ( 2                              )
     ) write_data_fifo (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
@@ -216,7 +238,7 @@ module axi_sram #(
         .push_i( axi.w_ready && axi.w_valid ),
 
         .data_o( write_data_fifo_out ),
-        .pop_o( write_request_tick )
+        .pop_i( write_request_tick )
     );
 
     assign axi.w_ready = !write_data_fifo_full;
@@ -230,8 +252,8 @@ module axi_sram #(
 
     
     fifo_v3 #(
-        .DATA_WIDTH ( $bits(write_response_fifo_entry_t) ),
-        .DEPTH      ( 2                                  ),
+        .DATA_WIDTH ( $bits(write_resp_fifo_entry_t) ),
+        .DEPTH      ( 2                              )
     ) write_resp_fifo (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
@@ -248,20 +270,22 @@ module axi_sram #(
         .push_i( write_request_free ),
 
         .data_o( axi.b_id ),
-        .pop_o( axi.b_ready && axi.b_valid )
+        .pop_i( axi.b_ready && axi.b_valid && !(rst_ni==0) )
     );
 
-    assign axi.b_ready = !write_resp_fifo_empty;
+    assign axi.b_valid = !write_resp_fifo_empty;
     assign axi.b_resp  = axi_pkg::RESP_OKAY;
 
     //
     // Burst counter management
     //
+    axi_pkg::len_t burst_counter;
+
     always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (rst_ni) begin
+        if (rst_ni == 0) begin
             burst_counter <= 0;
         end else begin
-            if (write_request_fifo_pop || read_request_fifo_pop) begin
+            if (write_request_free || read_request_free) begin
                 burst_counter <= 0;
             end else if (write_request_tick || read_request_tick) begin
                 burst_counter <= burst_counter + 1;
@@ -284,6 +308,11 @@ module axi_sram #(
         end
     end
  
+    logic read_last_beat;
+    logic [AXI_ADDR_WIDTH-1:0] transaction_addr;
+    logic transaction_valid;
+    logic transaction_write;
+
     always_comb begin 
         next_state = state;
 
@@ -294,10 +323,13 @@ module axi_sram #(
         write_request_tick = 1'b0;
         write_request_free = 1'b0;
 
+        transaction_valid = 1'b0;
+        transaction_write = 1'b0;
+
         unique case (state)
 
             IDLE: begin
-                if (read_request_pending) begin
+                if (!read_request_fifo_empty) begin
                     next_state = READ;
                 end else if (!write_data_fifo_empty && !write_resp_fifo_full) begin
                     next_state = WRITE;
@@ -310,7 +342,7 @@ module axi_sram #(
                     read_request_data_out.size,
                     read_request_data_out.len,
                     read_request_data_out.burst,
-                    read_request_data_out.burst_counter );
+                    burst_counter );
 
                 // SRAM_READ_LATENCY is taken care of in the FIFO sizing
                 transaction_valid = !read_id_fifo_full;
@@ -338,13 +370,13 @@ module axi_sram #(
                     write_request_data_out.size,
                     write_request_data_out.len,
                     write_request_data_out.burst,
-                    write_request_data_out.burst_counter );
+                    burst_counter );
 
-                if ( !write_data_fifo_emtpy ) begin
+                if ( !write_data_fifo_empty ) begin
                     transaction_valid = 1'b1;
                     if (burst_counter == write_request_data_out.len) begin
                         write_request_free = 1'b1;
-                        if (read_request_pending) begin
+                        if (!read_request_fifo_empty) begin
                             next_state = READ;
                         end else if (write_request_fifo_occupany > 1) begin
                             next_state = WRITE;
@@ -367,34 +399,40 @@ module axi_sram #(
    
     typedef logic [$clog2(SRAM_BANKS_ROWS)-1:0] sram_row_addr_t;
 
-    sram_row_addr_t [READ_LATENCY:0] sram_row_addr_pipe;
-    logic [READ_LATENCY:0] sram_read_pipe;
+    sram_row_addr_t [SRAM_READ_LATENCY:0] sram_row_addr_pipe;
+    logic [SRAM_READ_LATENCY:0] sram_read_pipe;
 
-    always_ff @(posedge clk_i) begin
+    integer row,col;
+    always_ff @(posedge clk_i or negedge rst_ni) begin
 
-        sram_row_addr_pipe [READ_LATENCY:1] <= sram_row_addr_pipe[ROW_LATENCY-1:0];
-        sram_read_pipe [READ_LATENCH:1]     <= sram_read_pipe[READ_LATENCY-1:0];
-        sram_read_pipe [0]                  <= 1'b0;
-        
-        if (transaction_valid) begin
-            bank_addr <= transaction_addr >> BANK_SHIFT;
-        end
+        if (rst_ni == 0) begin
+            sram_row_addr_pipe <= 0;
+            sram_read_pipe <= 0;
+        end else begin
+            sram_row_addr_pipe [SRAM_READ_LATENCY:1] <= sram_row_addr_pipe[SRAM_READ_LATENCY-1:0];
+            sram_read_pipe [SRAM_READ_LATENCY:1]     <= sram_read_pipe[SRAM_READ_LATENCY-1:0];
+            sram_read_pipe [0]                       <= 1'b0;
+            
+            if (transaction_valid) begin
+                bank_addr <= transaction_addr >> BANK_SHIFT;
+            end
 
-
-        for(i=0;i<SRAM_BANKS_ROWS;i++) begin
-            for(j=0;j<SRAM_BANKS_COLS;j++) begin
-                if (transaction_valid && (sram_decode_row == i)) begin
-                    bank_cs[i][j] <= 1'b1;
-                    bank_we[i][j] <= transaction_write;
-                    if (transaction_write == 1'b1) begin
-                        bank_be[i][j] <= transaction_be >> (j * $clog2(SRAM_BANK_DATA_WIDTH/8));
-                        bank_wdata[i][j] <= write_data_fifo_out >> (j * SRAM_BANK_DATA_WIDTH);
+            for(row=0;row<SRAM_BANKS_ROWS;row++) begin
+                for(col=0;col<SRAM_BANKS_COLS;col++) begin
+                    bank_be[row][col] = '0;
+                    if (transaction_valid && ( (transaction_addr[BANK_SHIFT+$clog2(SRAM_BANKS_ROWS):BANK_SHIFT]) == row)) begin
+                        bank_cs[row][col] <= 1'b1;
+                        bank_we[row][col] <= write_request_tick;
+                        if (write_request_tick == 1'b1) begin
+                            bank_be[row][col] <= write_data_fifo_out.data >> (col * $clog2(SRAM_BANK_DATA_WIDTH/8));
+                            bank_wdata[row][col] <= write_data_fifo_out.strb >> (col * SRAM_BANK_DATA_WIDTH);
+                        end else begin
+                            sram_row_addr_pipe[0] <= row;
+                            sram_read_pipe[0]     <= 1'b1;
+                        end
                     end else begin
-                        sram_row_addr_pipe[0] <= i;
-                        sram_read_pipe <= 1'b1;
+                        bank_cs[row][col] <= 1'b0;
                     end
-                end else begin
-                    bank_cs[i][j] <= 1'b0;
                 end
             end
         end
@@ -405,13 +443,11 @@ module axi_sram #(
     //
     logic [(SRAM_BANK_DATA_WIDTH*SRAM_BANKS_COLS)-1:0] read_data_out;
 
-    always_comb begin
-        for(i=0;i<SRAM_BANKS_COLS;i++) begin
-            read_data_out[SRAM_BANK_DATA_WIDTH*(i+1)-1:SRAM_BANK_DATA_WIDTH*(i+1)] = bank_rdata[sram_row_addr_pipe[0]][i];
-        end
+    for(i=0;i<SRAM_BANKS_COLS;i++) begin
+        assign read_data_out[SRAM_BANK_DATA_WIDTH*(i+1)-1:SRAM_BANK_DATA_WIDTH*(i)] = bank_rdata[sram_row_addr_pipe[0]][i];
     end
 
-    assign read_data_fifo_push = sram_read_pipe[READ_LATENCY];
+    assign read_data_fifo_push = sram_read_pipe[SRAM_READ_LATENCY];
     assign read_data_fifo_in   = read_data_out;
 
 

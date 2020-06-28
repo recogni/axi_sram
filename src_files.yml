@@ -1,4 +1,4 @@
 axi_sram:
   files: [
-    axi_sram.sv
+    src/axi_sram.sv
   ]
