@@ -19,7 +19,7 @@ module axi_sram #(
     parameter integer SRAM_BANK_DATA_WIDTH=32,
     parameter integer SRAM_READ_LATENCY=2,
     parameter integer WRITE_REQUEST_FIFO_DEPTH=2,
-    parameter integer READ_REQUEST_FIFO_DEPTH=2
+    parameter integer READ_REQUEST_FIFO_DEPTH=4
 ) (
     input logic clk_i,
     input logic rst_ni,
@@ -37,6 +37,7 @@ module axi_sram #(
 );
     genvar i,j;
 
+    logic write_request_tick, read_request_tick;
     logic read_request_free;
     logic write_request_free;
 
@@ -113,7 +114,7 @@ module axi_sram #(
         .usage_o(),
 
         .data_i(read_id_fifo_in),
-        .push_i(read_request_free),
+        .push_i(read_request_tick || read_request_free),
 
         .data_o(read_id_fifo_out),
         .pop_i(read_id_fifo_pop)
@@ -201,9 +202,6 @@ module axi_sram #(
     assign write_request_data_in.len  = axi.aw_len;
     assign write_request_data_in.size = axi.aw_size;
     assign write_request_data_in.burst = axi.aw_burst; 
-
-
-    logic write_request_tick, read_request_tick;
 
 
     //
@@ -348,8 +346,9 @@ module axi_sram #(
                 transaction_valid = !read_id_fifo_full;
 
                 if (transaction_valid) begin
+                    read_request_tick = 1'b1;
                     if (burst_counter == read_request_data_out.len) begin
-                        read_last_beat = 1'b0;
+                        read_last_beat = 1'b1;
                         read_request_free = 1'b1;
                         if (!write_data_fifo_empty && !write_resp_fifo_full) begin
                             next_state = WRITE;
@@ -358,9 +357,7 @@ module axi_sram #(
                         end else begin
                             next_state = IDLE;
                         end
-                    end else begin
-                        read_request_tick = 1'b1;
-                    end
+                    end 
                 end
             end
 
@@ -373,7 +370,8 @@ module axi_sram #(
                     burst_counter );
 
                 if ( !write_data_fifo_empty ) begin
-                    transaction_valid = 1'b1;
+                    transaction_valid = 1'b1; 
+                    write_request_tick = 1'b1;
                     if (burst_counter == write_request_data_out.len) begin
                         write_request_free = 1'b1;
                         if (!read_request_fifo_empty) begin
@@ -383,9 +381,7 @@ module axi_sram #(
                         end else begin
                             next_state = IDLE;
                         end
-                    end else begin
-                        write_request_tick = 1'b1;
-                    end
+                    end 
                 end
             end
         endcase 
@@ -415,20 +411,23 @@ module axi_sram #(
             
             if (transaction_valid) begin
                 bank_addr <= transaction_addr >> BANK_SHIFT;
+                if (read_request_tick) begin
+                    sram_read_pipe[0] <= 1'b1;
+                end
             end
 
             for(row=0;row<SRAM_BANKS_ROWS;row++) begin
                 for(col=0;col<SRAM_BANKS_COLS;col++) begin
                     bank_be[row][col] = '0;
+                    // FIXME address bank decoder
                     if (transaction_valid && ( (transaction_addr[BANK_SHIFT+$clog2(SRAM_BANKS_ROWS):BANK_SHIFT]) == row)) begin
                         bank_cs[row][col] <= 1'b1;
                         bank_we[row][col] <= write_request_tick;
                         if (write_request_tick == 1'b1) begin
-                            bank_be[row][col] <= write_data_fifo_out.data >> (col * $clog2(SRAM_BANK_DATA_WIDTH/8));
+                            bank_be[row][col]    <= write_data_fifo_out.data >> (col * $clog2(SRAM_BANK_DATA_WIDTH/8));
                             bank_wdata[row][col] <= write_data_fifo_out.strb >> (col * SRAM_BANK_DATA_WIDTH);
                         end else begin
                             sram_row_addr_pipe[0] <= row;
-                            sram_read_pipe[0]     <= 1'b1;
                         end
                     end else begin
                         bank_cs[row][col] <= 1'b0;
