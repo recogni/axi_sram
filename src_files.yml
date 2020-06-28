@@ -1,0 +1,4 @@
+axi_sram:
+  files: [
+    axi_sram.sv
+  ]
