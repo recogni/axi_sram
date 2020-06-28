@@ -2,7 +2,9 @@
 // AXI multi-cycle latency SRAM wrapper using pulp_platform axi interfaces
 //
 // Author: Eugene Feinberg <eugene@recogni.com>
+// Copyright Recogni, Inc 2020
 //
+
 
 import axi_pkg::*;
 
@@ -19,8 +21,8 @@ module axi_sram #(
     parameter integer WRITE_REQUESTS=2,
     parameter integer READ_REQUESTS=2
 ) (
-    input logic clk,
-    input logic reset,
+    input logic clk_i,
+    input logic rst_ni,
 
     // AXI slave interface
     AXI_BUS.Slave axi,
@@ -368,7 +370,7 @@ module axi_sram #(
     sram_row_addr_t [READ_LATENCY:0] sram_row_addr_pipe;
     logic [READ_LATENCY:0] sram_read_pipe;
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk_i) begin
 
         sram_row_addr_pipe [READ_LATENCY:1] <= sram_row_addr_pipe[ROW_LATENCY-1:0];
         sram_read_pipe [READ_LATENCH:1]     <= sram_read_pipe[READ_LATENCY-1:0];
