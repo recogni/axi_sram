@@ -7,17 +7,17 @@
 import axi_pkg::*;
 
 module axi_sram #(
-    integer parameter AXI_ADDR_WIDTH=64,
-    integer parameter AXI_DATA_WIDTH=64,
-    integer parameter AXI_ID_WIDTH=4,
-    integer parameter AXI_USER_WIDTH=4,
-    integer parameter SRAM_BANKS_ROWS=1,
-    integer parameter SRAM_BANKS_COLS=1,
-    integer parameter SRAM_BANK_ADDR_WIDTH=16,
-    integer parameter SRAM_BANK_DATA_WIDTH=32,
-    integer parameter SRAM_READ_LATENCY=2,
-    integer parameter WRITE_REQUESTS=2,
-    integer parameter READ_REQUESTS=2
+    parameter integer AXI_ADDR_WIDTH=64,
+    parameter integer AXI_DATA_WIDTH=64,
+    parameter integer AXI_ID_WIDTH=4,
+    parameter integer AXI_USER_WIDTH=4,
+    parameter integer SRAM_BANKS_ROWS=1,
+    parameter integer SRAM_BANKS_COLS=1,
+    parameter integer SRAM_BANK_ADDR_WIDTH=16,
+    parameter integer SRAM_BANK_DATA_WIDTH=32,
+    parameter integer SRAM_READ_LATENCY=2,
+    parameter integer WRITE_REQUESTS=2,
+    parameter integer READ_REQUESTS=2
 ) (
     input logic clk,
     input logic reset,
@@ -115,11 +115,11 @@ module axi_sram #(
     //
     // Read or write request entry
     //
-    typedef struct {
+    typedef struct packed {
         logic [AXI_ADDR_WIDTH-1:0] addr;
         logic [AXI_ID_WIDTH-1:0]   id;
         axi_pkg::len_t             len;
-        axi_pkg::burst_t           type;
+        axi_pkg::burst_t           burst;
     } mem_request_t;
 
     fifo_v3 #(
@@ -172,7 +172,7 @@ module axi_sram #(
     assign read_request_data_in.addr = axi.ar_addr;
     assign read_request_data_in.id   = axi.ar_id;
     assign read_request_data_in.len  = axi.ar_len;
-    assign read_request_data_in.type = axi.ar_burst; 
+    assign read_request_data_in.burst = axi.ar_burst; 
 
     //
     // AW channel management
@@ -181,7 +181,7 @@ module axi_sram #(
     assign write_request_data_in.addr = axi.aw_addr;
     assign write_request_data_in.id   = axi.aw_id;
     assign write_request_data_in.len  = axi.aw_len;
-    assign write_request_data_in.type = axi.aw_burst; 
+    assign write_request_data_in.burst = axi.aw_burst; 
 
 
     //
@@ -255,7 +255,7 @@ module axi_sram #(
     //
     // Burst counter management
     //
-    always_ff @(posedge clk or negedge rst_ni) begin
+    always_ff @(posedge clk_i or negedge rst_ni) begin
         if (rst_ni) begin
             burst_counter <= 0;
         end else begin
@@ -274,7 +274,7 @@ module axi_sram #(
 
     state_t state, next_state;
 
-    always @(podege clk or negedge rst_ni) begin
+    always_ff @(posedge clk_i or negedge rst_ni) begin
         if (rst_ni == 0) begin
             state <= IDLE;
         end else begin
@@ -282,7 +282,7 @@ module axi_sram #(
         end
     end
  
-    always_comb @(*) begin 
+    always_comb begin 
         next_state = state;
 
         read_request_tick = 1'b0;
@@ -307,7 +307,7 @@ module axi_sram #(
                     read_request_data_out.addr,
                     read_request_data_out.size,
                     read_request_data_out.len,
-                    read_request_data_out.type,
+                    read_request_data_out.burst,
                     read_request_data_out.burst_counter );
 
                 // SRAM_READ_LATENCY is taken care of in the FIFO sizing
@@ -335,7 +335,7 @@ module axi_sram #(
                     write_request_data_out.addr,
                     write_request_data_out.size,
                     write_request_data_out.len,
-                    write_request_data_out.type,
+                    write_request_data_out.burst,
                     write_request_data_out.burst_counter );
 
                 if ( !write_data_fifo_emtpy ) begin
@@ -346,7 +346,7 @@ module axi_sram #(
                             next_state = READ;
                         end else if (write_request_fifo_occupany > 1) begin
                             next_state = WRITE;
-                        end else 
+                        end else begin
                             next_state = IDLE;
                         end
                     end else begin
@@ -371,7 +371,7 @@ module axi_sram #(
     always_ff @(posedge clk) begin
 
         sram_row_addr_pipe [READ_LATENCY:1] <= sram_row_addr_pipe[ROW_LATENCY-1:0];
-        sram_read_pipe [READ_LATENCH:1]     <= sram_read_pipe[READ_LATENCY-1:0]
+        sram_read_pipe [READ_LATENCH:1]     <= sram_read_pipe[READ_LATENCY-1:0];
         sram_read_pipe [0]                  <= 1'b0;
         
         if (transaction_valid) begin
@@ -403,7 +403,7 @@ module axi_sram #(
     //
     logic [(SRAM_BANK_DATA_WIDTH*SRAM_BANKS_COLS)-1:0] read_data_out;
 
-    always_comb @(*) begin
+    always_comb begin
         for(i=0;i<SRAM_BANKS_COLS;i++) begin
             read_data_out[SRAM_BANK_DATA_WIDTH*(i+1)-1:SRAM_BANK_DATA_WIDTH*(i+1)] = bank_rdata[sram_row_addr_pipe[0]][i];
         end
