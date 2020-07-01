@@ -391,41 +391,42 @@ module axi_sram #(
     // Address decoder 
     //
     localparam integer ADDRESS_SHIFT = $clog2(AXI_DATA_WIDTH/8);
-    localparam integer BANK_SHIFT    = ADDRESS_SHIFT + ((SRAM_BANKS_ROWS==0) ? 0 : $clog2(SRAM_BANKS_ROWS));
-   
+    localparam integer BANK_SHIFT    = ADDRESS_SHIFT + $clog2(SRAM_BANKS_ROWS);
+    localparam logic [SRAM_BANK_ADDR_WIDTH-1:0] SRAM_BANK_ADDRESS_MASK = 
+        ~({SRAM_BANK_ADDR_WIDTH{1'b1}} << $clog2(SRAM_BANKS_ROWS));
+
     typedef logic [$clog2(SRAM_BANKS_ROWS)-1:0] sram_row_addr_t;
 
+    // Fixed latency pipeline which tracks reads in flight
     sram_row_addr_t [SRAM_READ_LATENCY:0] sram_row_addr_pipe;
     logic [SRAM_READ_LATENCY:0] sram_read_pipe;
 
     integer row,col;
     always_ff @(posedge clk_i or negedge rst_ni) begin
-
         if (rst_ni == 0) begin
             sram_row_addr_pipe <= 0;
             sram_read_pipe <= 0;
         end else begin
-            sram_row_addr_pipe [SRAM_READ_LATENCY:1] <= sram_row_addr_pipe[SRAM_READ_LATENCY-1:0];
-            sram_read_pipe [SRAM_READ_LATENCY:1]     <= sram_read_pipe[SRAM_READ_LATENCY-1:0];
-            sram_read_pipe [0]                       <= 1'b0;
-            
+
+            // Send transactions down the pipeline
+            sram_row_addr_pipe[SRAM_READ_LATENCY:1] <= sram_row_addr_pipe[SRAM_READ_LATENCY-1:0];
+            sram_read_pipe[SRAM_READ_LATENCY:1]     <= sram_read_pipe[SRAM_READ_LATENCY-1:0];
+            sram_read_pipe[0]                       <= read_request_tick;
+
             if (transaction_valid) begin
                 bank_addr <= transaction_addr >> BANK_SHIFT;
-                if (read_request_tick) begin
-                    sram_read_pipe[0] <= 1'b1;
-                end
             end
 
-            for(row=0;row<SRAM_BANKS_ROWS;row++) begin
+            for(row=0;row<SRAM_BANKS_ROWS;row++) begin      
                 for(col=0;col<SRAM_BANKS_COLS;col++) begin
-                    bank_be[row][col] = '0;
-                    // FIXME address bank decoder
-                    if (transaction_valid && ( (transaction_addr[BANK_SHIFT+$clog2(SRAM_BANKS_ROWS):BANK_SHIFT]) == row)) begin
+                    if (transaction_valid &&
+                        ((((transaction_addr >> $clog2(SRAM_BANKS_ROWS)) << $clog2(SRAM_BANKS_ROWS)) | (row << ADDRESS_SHIFT)) == transaction_addr)
+                        ) begin
                         bank_cs[row][col] <= 1'b1;
                         bank_we[row][col] <= write_request_tick;
                         if (write_request_tick == 1'b1) begin
-                            bank_be[row][col]    <= write_data_fifo_out.data >> (col * $clog2(SRAM_BANK_DATA_WIDTH/8));
-                            bank_wdata[row][col] <= write_data_fifo_out.strb >> (col * SRAM_BANK_DATA_WIDTH);
+                            bank_be[row][col]    <= write_data_fifo_out.strb >> (col * ($clog2(SRAM_BANK_DATA_WIDTH/8)-1));
+                            bank_wdata[row][col] <= write_data_fifo_out.data >> (col * SRAM_BANK_DATA_WIDTH);
                         end else begin
                             sram_row_addr_pipe[0] <= row;
                         end
