@@ -31,7 +31,7 @@ module axi_sram #(
     output logic [SRAM_BANK_ADDR_WIDTH-1:0]                                                     bank_addr,
     output logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0]                                     bank_cs,
     output logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0]                                     bank_we,
-    output logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0][$clog2(SRAM_BANK_DATA_WIDTH/8)-1:0] bank_be,
+    output logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0][(SRAM_BANK_DATA_WIDTH/8)-1:0]       bank_be,
     output logic                      [SRAM_BANKS_COLS-1:0][SRAM_BANK_DATA_WIDTH-1:0]           bank_wdata,
     input  logic [SRAM_BANKS_ROWS-1:0][SRAM_BANKS_COLS-1:0][SRAM_BANK_DATA_WIDTH-1:0]           bank_rdata
 );
