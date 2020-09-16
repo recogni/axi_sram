@@ -114,7 +114,7 @@ module axi_sram #(
         .usage_o(),
 
         .data_i(read_id_fifo_in),
-        .push_i(read_request_tick || read_request_free),
+        .push_i(read_request_tick),
 
         .data_o(read_id_fifo_out),
         .pop_i(read_id_fifo_pop)
