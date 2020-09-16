@@ -164,6 +164,8 @@ module axi_sram #(
 
     mem_request_t write_request_data_in, write_request_data_out;
 
+    logic [$clog2(WRITE_REQUEST_FIFO_DEPTH)-1:0] write_request_fifo_occupany;
+
     fifo_v3 #(
         .DATA_WIDTH ( $bits(mem_request_t) ),
         .DEPTH      ( WRITE_REQUEST_FIFO_DEPTH )
