@@ -48,7 +48,7 @@ module axi_sram #(
     // buffered if the AXI read response interface is not ready to accept the result
     // when it is available from the memory macro
     //
-    localparam READ_FIFO_DEPTH=2;
+    localparam READ_FIFO_DEPTH=4;
 
     //
     // The data fifo holds read results from the memory core 
