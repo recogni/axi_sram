@@ -212,8 +212,11 @@ module axi_sram #(
         logic [(AXI_DATA_WIDTH/8)-1:0] strb;
     } write_data_fifo_entry_t;
 
-    write_data_fifo_entry_t write_data_fifo_in = '{ data: axi.w_data, strb: axi.w_strb };
+    write_data_fifo_entry_t write_data_fifo_in;
     write_data_fifo_entry_t write_data_fifo_out;
+
+    assign write_data_fifo_in.data = axi.w_data;
+    assign write_data_fifo_in.strb = axi.w_strb;
 
     logic write_data_fifo_empty;
 
@@ -232,7 +235,7 @@ module axi_sram #(
 
         .usage_o(),
 
-        .data_i( axi.w_data ),
+        .data_i( write_data_fifo_in ),
         .push_i( axi.w_ready && axi.w_valid ),
 
         .data_o( write_data_fifo_out ),
@@ -428,7 +431,9 @@ module axi_sram #(
                         bank_cs[row][col] <= 1'b1;
                         bank_we[row][col] <= write_request_tick;
                         if (write_request_tick == 1'b1) begin
-                            bank_be[row][col]    <= write_data_fifo_out.strb >> (col * ($clog2(SRAM_BANK_DATA_WIDTH/8)-1));
+
+                            bank_be[row][col][(SRAM_BANK_DATA_WIDTH/8)-1:0] <= 
+                                (write_data_fifo_out.strb >> (col * ($clog2(SRAM_BANK_DATA_WIDTH/8)-1)));
                             bank_wdata[col] <= write_data_fifo_out.data >> (col * SRAM_BANK_DATA_WIDTH);
                         end else begin
                             sram_row_addr_pipe[0] <= row;
