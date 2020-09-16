@@ -324,6 +324,8 @@ module axi_sram #(
         transaction_valid = 1'b0;
         transaction_write = 1'b0;
 
+        transaction_addr  = 'x;
+
         unique case (state)
 
             IDLE: begin
@@ -384,6 +386,7 @@ module axi_sram #(
                     end 
                 end
             end
+
         endcase 
     end
 
@@ -426,7 +429,7 @@ module axi_sram #(
                         bank_we[row][col] <= write_request_tick;
                         if (write_request_tick == 1'b1) begin
                             bank_be[row][col]    <= write_data_fifo_out.strb >> (col * ($clog2(SRAM_BANK_DATA_WIDTH/8)-1));
-                            bank_wdata[row][col] <= write_data_fifo_out.data >> (col * SRAM_BANK_DATA_WIDTH);
+                            bank_wdata[col] <= write_data_fifo_out.data >> (col * SRAM_BANK_DATA_WIDTH);
                         end else begin
                             sram_row_addr_pipe[0] <= row;
                         end
