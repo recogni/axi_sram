@@ -138,6 +138,8 @@ module axi_sram #(
 
     mem_request_t read_request_data_in, read_request_data_out;
 
+    logic [$clog2(READ_REQUEST_FIFO_DEPTH)-1:0] read_request_fifo_occupancy;
+
     fifo_v3 #(
         .DATA_WIDTH ( $bits(mem_request_t) ),
         .DEPTH      ( READ_REQUEST_FIFO_DEPTH )
