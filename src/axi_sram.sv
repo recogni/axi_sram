@@ -331,7 +331,7 @@ module axi_sram #(
         transaction_valid = 1'b0;
         transaction_write = 1'b0;
 
-        transaction_addr  = 'x;
+        transaction_addr  = '0;
 
         unique case (state)
 
