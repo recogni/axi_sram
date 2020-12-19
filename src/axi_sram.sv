@@ -416,6 +416,11 @@ module axi_sram #(
         if (rst_ni == 0) begin
             sram_row_addr_pipe <= 0;
             sram_read_pipe <= 0;
+            for(row=0;row<SRAM_BANKS_ROWS;row++) begin      
+                for(col=0;col<SRAM_BANKS_COLS;col++) begin
+                    bank_cs[row][col] <= 1'b0;
+                end
+            end
         end else begin
 
             // Send transactions down the pipeline
